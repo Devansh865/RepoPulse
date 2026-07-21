@@ -10,9 +10,22 @@ import {
   Loader2,
   TrendingUp,
   FileText,
-  Workflow
+  Workflow,
+  ShieldCheck,
+  CircleAlert,
+  Trash2,
+  Zap,
+  TestTube2,
+  Route,
+  Link2
 } from 'lucide-react';
 import DependencyGraph from './components/DependencyGraph';
+import {
+  computeBlastRadius,
+  computeDeleteImpact,
+  computeHealthScore,
+  findDeadCode,
+} from './utils/graphAnalysis';
 
 // High-quality mock data for instant demo/offline capability
 const MOCK_GRAPH = {
@@ -50,6 +63,26 @@ const MOCK_GRAPH = {
   ]
 };
 
+function ImpactMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+  return (
+    <div style={{ background: 'rgba(0, 0, 0, 0.16)', borderRadius: 7, padding: 8 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-secondary)', fontSize: 10 }}>{icon}{label}</span>
+      <strong style={{ display: 'block', marginTop: 4, fontSize: 16 }}>{value}</strong>
+    </div>
+  );
+}
+
+function HealthList({ title, items, positive = false }: { title: string; items: string[]; positive?: boolean }) {
+  if (items.length === 0) return null;
+  const color = positive ? 'var(--color-success)' : 'var(--color-warning)';
+  return (
+    <div style={{ marginTop: 14 }}>
+      <span style={{ display: 'block', fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>{title}</span>
+      {items.slice(0, 3).map(item => <div key={item} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11, color: 'var(--text-secondary)', marginTop: 5 }}><span style={{ color, fontWeight: 700 }}>{positive ? '✓' : '⚠'}</span>{item}</div>)}
+    </div>
+  );
+}
+
 export default function App() {
   const [repoUrl, setRepoUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -60,6 +93,7 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
+  const [showDeleteImpact, setShowDeleteImpact] = useState(false);
 
   // Trigger analysis via local FastAPI server
   const handleAnalyze = async (e?: React.FormEvent, customUrl?: string) => {
@@ -96,6 +130,7 @@ export default function App() {
       const data = await response.json();
       setGraphData(data);
       setSelectedNodeId(null);
+      setShowDeleteImpact(false);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Could not connect to analysis backend. Ensure the backend server is running on localhost:8000.');
@@ -111,6 +146,7 @@ export default function App() {
     setTimeout(() => {
       setGraphData(MOCK_GRAPH);
       setSelectedNodeId(null);
+      setShowDeleteImpact(false);
       setIsLoading(false);
     }, 1200);
   };
@@ -120,6 +156,7 @@ export default function App() {
     setSelectedNodeId(null);
     setSearchQuery('');
     setFilterType('ALL');
+    setShowDeleteImpact(false);
   };
 
   // Extract unique file extensions for the filter dropdown
@@ -169,6 +206,33 @@ export default function App() {
 
     return { ...node, imports, importedBy };
   }, [graphData, selectedNodeId]);
+
+  const blastRadius = useMemo(() => {
+    if (!graphData || !selectedNodeId) return [];
+    return Array.from(computeBlastRadius(selectedNodeId, graphData.edges));
+  }, [graphData, selectedNodeId]);
+
+  const healthReport = useMemo(() => {
+    if (!graphData) return null;
+    return computeHealthScore(graphData.nodes, graphData.edges);
+  }, [graphData]);
+
+  const deadCodeCandidates = useMemo(() => {
+    if (!graphData) return [];
+    return graphData.nodes.filter(node => findDeadCode(graphData.nodes, graphData.edges).has(node.id));
+  }, [graphData]);
+
+  const deleteImpact = useMemo(() => {
+    if (!graphData || !selectedNodeId) return null;
+    return computeDeleteImpact(selectedNodeId, graphData.edges);
+  }, [graphData, selectedNodeId]);
+
+  const selectedIsRemovalCandidate = Boolean(selectedNodeId && deadCodeCandidates.some(node => node.id === selectedNodeId));
+
+  const selectNode = (nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+    setShowDeleteImpact(false);
+  };
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -415,7 +479,8 @@ export default function App() {
                   apiNodes={filteredNodes}
                   apiEdges={filteredEdges}
                   selectedNodeId={selectedNodeId}
-                  onSelectNode={setSelectedNodeId}
+                  blastRadiusIds={blastRadius}
+                  onSelectNode={selectNode}
                 />
               )}
             </div>
@@ -453,6 +518,13 @@ export default function App() {
                     </div>
                   </div>
 
+                  {selectedIsRemovalCandidate && (
+                    <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: 10, padding: 12 }}>
+                      <strong style={{ display: 'block', fontSize: 12, color: '#fbbf24' }}>Safe to investigate for removal</strong>
+                      <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 5 }}>RepoPulse found no local file importing this module. This is a candidate, not proof of dead code—check runtime loading, scripts, and external consumers before removal.</p>
+                    </div>
+                  )}
+
                   {/* Outgoing Imports (What it depends on) */}
                   <div>
                     <h4 style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -464,8 +536,8 @@ export default function App() {
                       <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {selectedNodeDetails.imports.map(imp => (
                           <li 
-                            key={imp}
-                            onClick={() => setSelectedNodeId(imp)}
+                          key={imp}
+                            onClick={() => selectNode(imp)}
                             style={{ 
                               background: 'rgba(255,255,255,0.02)', 
                               border: '1px solid var(--border-color)', 
@@ -498,8 +570,8 @@ export default function App() {
                       <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {selectedNodeDetails.importedBy.map(impBy => (
                           <li 
-                            key={impBy}
-                            onClick={() => setSelectedNodeId(impBy)}
+                          key={impBy}
+                            onClick={() => selectNode(impBy)}
                             style={{ 
                               background: 'rgba(255,255,255,0.02)', 
                               border: '1px solid var(--border-color)', 
@@ -519,12 +591,52 @@ export default function App() {
                       </ul>
                     )}
                   </div>
+
+                  <div style={{ background: 'rgba(6, 182, 212, 0.07)', border: '1px solid rgba(6, 182, 212, 0.2)', borderRadius: '10px', padding: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--color-accent)' }}>
+                      <Zap size={16} />
+                      <strong style={{ fontSize: '12px' }}>Blast Radius</strong>
+                    </div>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 8 }}>
+                      A change here can affect <strong style={{ color: 'var(--text-primary)' }}>{blastRadius.length}</strong> downstream file{blastRadius.length === 1 ? '' : 's'} through local import paths.
+                    </p>
+                    {blastRadius.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                        {blastRadius.slice(0, 5).map(id => (
+                          <button key={id} type="button" onClick={() => selectNode(id)} style={{ background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.2)', color: 'var(--text-primary)', borderRadius: 5, padding: '4px 6px', fontSize: 10, fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
+                            {id.split('/').pop()}
+                          </button>
+                        ))}
+                        {blastRadius.length > 5 && <span style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '4px 0' }}>+{blastRadius.length - 5} more</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <button className="cyber-button-secondary" onClick={() => setShowDeleteImpact(value => !value)} style={{ width: '100%', justifyContent: 'center', borderColor: showDeleteImpact ? 'rgba(239, 68, 68, 0.55)' : undefined, color: showDeleteImpact ? '#fca5a5' : undefined }}>
+                      <Trash2 size={15} /> {showDeleteImpact ? 'Hide Delete Assessment' : 'Simulate File Deletion'}
+                    </button>
+                    {showDeleteImpact && deleteImpact && (
+                      <div style={{ marginTop: 10, background: 'rgba(239, 68, 68, 0.07)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 10, padding: 14 }}>
+                        <strong style={{ display: 'block', fontSize: 12, color: '#fca5a5' }}>Deleting this file will break or affect</strong>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+                          <ImpactMetric icon={<Link2 size={14} />} label="Direct imports" value={deleteImpact.directImporters.length} />
+                          <ImpactMetric icon={<Zap size={14} />} label="Total blast radius" value={deleteImpact.blastRadius.length} />
+                          <ImpactMetric icon={<TestTube2 size={14} />} label="Affected tests" value={deleteImpact.testFiles.length} />
+                          <ImpactMetric icon={<Route size={14} />} label="API / route files" value={deleteImpact.apiFiles.length} />
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 12 }}>
+                          Risk: <strong style={{ color: '#fca5a5' }}>{deleteImpact.riskLevel}</strong> · estimated remediation {deleteImpact.estimatedTime}. CI pipelines are not yet indexed, so they are excluded from this assessment.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ padding: '16px', borderTop: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.1)' }}>
                   <button 
                     className="cyber-button-secondary" 
-                    onClick={() => setSelectedNodeId(null)}
+                    onClick={() => selectNode(null)}
                     style={{ width: '100%', justifyContent: 'center' }}
                   >
                     Clear Inspection
@@ -561,6 +673,28 @@ export default function App() {
                     </div>
                   </div>
 
+                  {healthReport && (
+                    <section style={{ background: 'rgba(168, 85, 247, 0.07)', border: '1px solid rgba(168, 85, 247, 0.2)', borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--color-primary)' }}><ShieldCheck size={16} /><strong style={{ fontSize: 12 }}>Architecture Health</strong></div>
+                        <strong style={{ fontSize: 18 }}>{healthReport.score}<span style={{ fontSize: 11, color: 'var(--text-secondary)' }}> / 100</span></strong>
+                      </div>
+                      <HealthList title="Strengths" items={healthReport.strengths} positive />
+                      <HealthList title="Investigate" items={healthReport.weaknesses} />
+                    </section>
+                  )}
+
+                  <section style={{ background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: 10, padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--color-warning)' }}><CircleAlert size={16} /><strong style={{ fontSize: 12 }}>Removal Candidates</strong></div>
+                    <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 7 }}>Files with no detected local importers, excluding entry points and tests. Review before deleting.</p>
+                    {deadCodeCandidates.length === 0 ? <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 9 }}>No candidates detected.</p> : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10 }}>
+                        {deadCodeCandidates.slice(0, 5).map(node => <button key={node.id} type="button" onClick={() => selectNode(node.id)} style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.16)', color: 'var(--text-primary)', borderRadius: 6, padding: '7px 8px', textAlign: 'left', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.id}</button>)}
+                        {deadCodeCandidates.length > 5 && <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>+{deadCodeCandidates.length - 5} more candidates</span>}
+                      </div>
+                    )}
+                  </section>
+
                   {/* List of Files in Sidebar */}
                   <div>
                     <h4 style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
@@ -570,7 +704,7 @@ export default function App() {
                       {filteredNodes.map(node => (
                         <div 
                           key={node.id}
-                          onClick={() => setSelectedNodeId(node.id)}
+                          onClick={() => selectNode(node.id)}
                           style={{ 
                             padding: '8px 12px', 
                             fontSize: '12px', 

@@ -81,6 +81,7 @@ interface GraphProps {
   apiNodes: ApiNode[];
   apiEdges: ApiEdge[];
   selectedNodeId: string | null;       // driven from outside (sidebar clicks)
+  blastRadiusIds: string[];
   onSelectNode: (nodeId: string | null) => void;
 }
 
@@ -106,6 +107,7 @@ export default function DependencyGraph({
   apiNodes,
   apiEdges,
   selectedNodeId,
+  blastRadiusIds,
   onSelectNode,
 }: GraphProps) {
   const nodeTypes = useMemo(() => ({ fileNode: CustomFileNode }), []);
@@ -168,12 +170,15 @@ export default function DependencyGraph({
     if (edges.length === 0) return;
 
     const nothingSelected = selectedNodeId === null;
+    const impactedIds = new Set(blastRadiusIds);
 
     setEdges(prev =>
       prev.map(edge => {
         const isOutgoing = edge.source === selectedNodeId;
         const isIncoming = edge.target === selectedNodeId;
-        const active = isOutgoing || isIncoming;
+        const isBlastPath = impactedIds.has(edge.source) &&
+          (impactedIds.has(edge.target) || edge.target === selectedNodeId);
+        const active = isOutgoing || isIncoming || isBlastPath;
         const style  = buildEdgeStyle(active, isIncoming, nothingSelected);
 
         return {
@@ -194,10 +199,10 @@ export default function DependencyGraph({
     setNodes(prev =>
       prev.map(node => ({
         ...node,
-        selected: node.id === selectedNodeId,
+        selected: node.id === selectedNodeId || impactedIds.has(node.id),
       }))
     );
-  }, [selectedNodeId, setEdges, setNodes]);  // deliberately omit `edges` to avoid loop
+  }, [selectedNodeId, blastRadiusIds, setEdges, setNodes]);  // deliberately omit `edges` to avoid loop
 
   // ── Canvas interaction handlers ──────────────────────────────────────
   const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {

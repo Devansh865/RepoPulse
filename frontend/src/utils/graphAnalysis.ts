@@ -240,7 +240,6 @@ export interface DeleteImpact {
 
 export function computeDeleteImpact(
   nodeId:  string,
-  nodes:   ApiNode[],
   edges:   ApiEdge[],
 ): DeleteImpact {
   const directImporters = edges
