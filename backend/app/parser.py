@@ -54,12 +54,12 @@ def get_repo_temp_path(repo_url: str) -> str:
     return os.path.join(TEMP_REPOS_DIR, folder_name)
 
 def clone_repo(repo_url: str, dest_path: str) -> str:
-    """Clones a GitHub repository to a local folder using shallow clone."""
+    """Clones a GitHub repository to a local folder."""
     safe_rmtree(dest_path)
     os.makedirs(dest_path, exist_ok=True)
     
-    # We do a shallow clone (depth=1) for speed
-    git.Repo.clone_from(repo_url, dest_path, depth=1)
+    # Clone the repository (retain history for coupling analysis)
+    git.Repo.clone_from(repo_url, dest_path)
     
     # Return the repository name
     repo_name = repo_url.rstrip("/").split("/")[-1]
@@ -281,8 +281,82 @@ def parse_repo_dependencies(repo_dir: str) -> Tuple[List[dict], List[dict]]:
                 
     return nodes, edges
 
+def get_historical_coupling(repo_path: str) -> List[dict]:
+    """Analyzes git history to find historical co-change coupling between files."""
+    try:
+        repo = git.Repo(repo_path)
+        # Limit to the last 150 commits to ensure performance remains fast
+        commits = list(repo.iter_commits(max_count=150))
+        
+        file_counts = {}
+        co_change_counts = {}
+        
+        for commit in commits:
+            modified_files = set()
+            # If the commit has parents, we check the diff
+            if commit.parents:
+                for parent in commit.parents:
+                    diffs = parent.diff(commit)
+                    for d in diffs:
+                        if d.a_path:
+                            modified_files.add(d.a_path.replace("\\", "/"))
+                        if d.b_path:
+                            modified_files.add(d.b_path.replace("\\", "/"))
+            else:
+                # First/initial commit: list all files in the tree
+                for entry in commit.tree.traverse():
+                    if entry.type == "file":
+                        modified_files.add(entry.path.replace("\\", "/"))
+            
+            # Filter by supported codebase extensions
+            supported_exts = {".py", ".js", ".jsx", ".ts", ".tsx"}
+            modified_files = {
+                f for f in modified_files 
+                if os.path.splitext(f)[1].lower() in supported_exts
+            }
+            
+            # Record individual counts
+            for f in modified_files:
+                file_counts[f] = file_counts.get(f, 0) + 1
+                
+            # Record pair-wise co-change counts
+            modified_list = list(modified_files)
+            for i in range(len(modified_list)):
+                for j in range(i + 1, len(modified_list)):
+                    f1, f2 = sorted([modified_list[i], modified_list[j]])
+                    pair = (f1, f2)
+                    co_change_counts[pair] = co_change_counts.get(pair, 0) + 1
+                    
+        coupling_list = []
+        for (f1, f2), support in co_change_counts.items():
+            if support < 1:  # Require at least 1 co-change
+                continue
+            count1 = file_counts.get(f1, 0)
+            count2 = file_counts.get(f2, 0)
+            if count1 == 0 or count2 == 0:
+                continue
+            
+            # co-change frequency: support / min(count1, count2)
+            frequency = support / min(count1, count2)
+            jaccard = support / (count1 + count2 - support)
+            
+            coupling_list.append({
+                "file1": f1,
+                "file2": f2,
+                "support": support,
+                "frequency": round(frequency * 100),
+                "jaccard": round(jaccard * 100)
+            })
+            
+        # Sort by frequency desc, support desc
+        coupling_list.sort(key=lambda x: (x["frequency"], x["support"]), reverse=True)
+        return coupling_list[:50]  # Return top 50 coupling connections
+    except Exception as e:
+        print(f"Error parsing git history for historical coupling: {e}")
+        return []
+
 def analyze_repo(repo_url: str) -> dict:
-    """Clones a repo, parses its dependencies, and cleans up the files."""
+    """Clones a repo, parses its dependencies, extracts coupling and cleans up."""
     # Ensure root temp directory is set up
     os.makedirs(TEMP_REPOS_DIR, exist_ok=True)
     
@@ -295,17 +369,15 @@ def analyze_repo(repo_url: str) -> dict:
         # 2. Parse dependencies
         nodes, edges = parse_repo_dependencies(dest_path)
         
-        # 3. Clean up the directory to conserve space (optional, but let's keep it clean)
-        # Actually, for Step 1, let's delete it right after parsing.
-        # But wait! If we delete it, we won't be able to query files for future features (like "AI assistant details" or "simulated changes").
-        # So we can keep it cached in temp_repos, but let's clear it if it exceeds a certain count, or clean older ones.
-        # Let's keep it cached for now so the session has it, but write a clean-up routine if it grows.
+        # 3. Analyze historical coupling
+        coupling = get_historical_coupling(dest_path)
         
         return {
             "status": "success",
             "repo_name": repo_name,
             "nodes": nodes,
-            "edges": edges
+            "edges": edges,
+            "historical_coupling": coupling
         }
     except Exception as e:
         # Attempt clean up on failure

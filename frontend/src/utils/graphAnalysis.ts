@@ -269,3 +269,56 @@ export function computeDeleteImpact(
 
   return { directImporters, blastRadius, testFiles, apiFiles, riskLevel, estimatedTime };
 }
+
+export interface HistoricalCoupling {
+  file1: string;
+  file2: string;
+  support: number;
+  frequency: number;
+  jaccard: number;
+}
+
+export function getRecommendedManualTests(nodeId: string, blastRadius: string[]): string[] {
+  const tests = new Set<string>();
+  const allPaths = [nodeId, ...blastRadius];
+  
+  for (const path of allPaths) {
+    const lower = path.toLowerCase();
+    
+    if (lower.includes('login') || lower.includes('auth')) {
+      tests.add('Login');
+    }
+    if (lower.includes('dashboard') || lower.includes('home')) {
+      tests.add('Dashboard');
+    }
+    if (lower.includes('settings') || lower.includes('config')) {
+      tests.add('Settings');
+    }
+    if (lower.includes('profile') || lower.includes('user')) {
+      tests.add('Profile');
+    }
+    if (lower.includes('theme') || lower.includes('dark') || lower.includes('style') || lower.includes('css')) {
+      tests.add('Dark Mode');
+    }
+    if (lower.includes('navbar') || lower.includes('menu') || lower.includes('navigation') || lower.includes('header')) {
+      tests.add('Mobile Navbar');
+    }
+    if (lower.includes('payment') || lower.includes('checkout') || lower.includes('cart') || lower.includes('stripe')) {
+      tests.add('Checkout & Payment Flow');
+    }
+    if (lower.includes('notification') || lower.includes('alert') || lower.includes('toast') || lower.includes('email')) {
+      tests.add('Notifications & Alerts');
+    }
+    if (lower.includes('search') || lower.includes('query') || lower.includes('filter')) {
+      tests.add('Search & Filters View');
+    }
+  }
+  
+  if (tests.size === 0) {
+    const filename = nodeId.split('/').pop() || nodeId;
+    tests.add(`Unit verification for ${filename}`);
+    tests.add(`API Integration Test`);
+  }
+  
+  return Array.from(tests);
+}

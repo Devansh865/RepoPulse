@@ -17,7 +17,9 @@ import {
   Zap,
   TestTube2,
   Route,
-  Link2
+  Link2,
+  CheckCircle2,
+  History
 } from 'lucide-react';
 import DependencyGraph from './components/DependencyGraph';
 import {
@@ -25,7 +27,9 @@ import {
   computeDeleteImpact,
   computeHealthScore,
   findDeadCode,
+  getRecommendedManualTests
 } from './utils/graphAnalysis';
+import type { HistoricalCoupling } from './utils/graphAnalysis';
 
 // High-quality mock data for instant demo/offline capability
 const MOCK_GRAPH = {
@@ -43,7 +47,14 @@ const MOCK_GRAPH = {
     { id: "tests/test_auth.py", label: "test_auth.py", type: "py", size: 2458, loc: 65 },
     { id: "frontend/src/App.tsx", label: "App.tsx", type: "tsx", size: 5120, loc: 110 },
     { id: "frontend/src/components/Graph.tsx", label: "Graph.tsx", type: "tsx", size: 4096, loc: 90 },
-    { id: "frontend/src/index.css", label: "index.css", type: "css", size: 2048, loc: 60 }
+    { id: "frontend/src/index.css", label: "index.css", type: "css", size: 2048, loc: 60 },
+    { id: "frontend/src/context/ThemeContext.tsx", label: "ThemeContext.tsx", type: "tsx", size: 1800, loc: 45 },
+    { id: "frontend/src/components/Navbar.tsx", label: "Navbar.tsx", type: "tsx", size: 2400, loc: 60 },
+    { id: "frontend/src/components/Sidebar.tsx", label: "Sidebar.tsx", type: "tsx", size: 2100, loc: 50 },
+    { id: "frontend/src/components/Dashboard.tsx", label: "Dashboard.tsx", type: "tsx", size: 5200, loc: 140 },
+    { id: "frontend/src/components/Settings.tsx", label: "Settings.tsx", type: "tsx", size: 3100, loc: 85 },
+    { id: "frontend/src/components/Profile.tsx", label: "Profile.tsx", type: "tsx", size: 2800, loc: 70 },
+    { id: "frontend/src/components/Login.tsx", label: "Login.tsx", type: "tsx", size: 3400, loc: 90 }
   ],
   edges: [
     { id: "main.py->auth.py", source: "main.py", target: "auth.py" },
@@ -59,7 +70,29 @@ const MOCK_GRAPH = {
     { id: "tests/test_payment.py->payment.py", source: "tests/test_payment.py", target: "payment.py" },
     { id: "tests/test_auth.py->auth.py", source: "tests/test_auth.py", target: "auth.py" },
     { id: "frontend/src/App.tsx->frontend/src/components/Graph.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Graph.tsx" },
-    { id: "frontend/src/App.tsx->frontend/src/index.css", source: "frontend/src/App.tsx", target: "frontend/src/index.css" }
+    { id: "frontend/src/App.tsx->frontend/src/index.css", source: "frontend/src/App.tsx", target: "frontend/src/index.css" },
+    { id: "frontend/src/App.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/App.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Navbar.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Navbar.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Sidebar.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Sidebar.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Dashboard.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Dashboard.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Settings.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Settings.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Profile.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Profile.tsx" },
+    { id: "frontend/src/App.tsx->frontend/src/components/Login.tsx", source: "frontend/src/App.tsx", target: "frontend/src/components/Login.tsx" },
+    { id: "frontend/src/components/Navbar.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Navbar.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/components/Sidebar.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Sidebar.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/components/Dashboard.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Dashboard.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/components/Settings.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Settings.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/components/Profile.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Profile.tsx", target: "frontend/src/context/ThemeContext.tsx" },
+    { id: "frontend/src/components/Login.tsx->frontend/src/context/ThemeContext.tsx", source: "frontend/src/components/Login.tsx", target: "frontend/src/context/ThemeContext.tsx" }
+  ],
+  historical_coupling: [
+    { file1: "auth.py", file2: "db.py", support: 12, frequency: 91, jaccard: 85 },
+    { file1: "payment.py", file2: "checkout.py", support: 15, frequency: 88, jaccard: 80 },
+    { file1: "frontend/src/context/ThemeContext.tsx", file2: "frontend/src/components/Navbar.tsx", support: 10, frequency: 82, jaccard: 75 },
+    { file1: "frontend/src/components/Dashboard.tsx", file2: "frontend/src/components/Sidebar.tsx", support: 8, frequency: 78, jaccard: 70 },
+    { file1: "main.py", file2: "config.py", support: 8, frequency: 75, jaccard: 68 },
+    { file1: "notifications.py", file2: "payment.py", support: 6, frequency: 70, jaccard: 55 },
+    { file1: "auth.py", file2: "models.py", support: 10, frequency: 65, jaccard: 60 }
   ]
 };
 
@@ -94,6 +127,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
   const [showDeleteImpact, setShowDeleteImpact] = useState(false);
+  const [checkedTests, setCheckedTests] = useState<Record<string, Record<string, boolean>>>({});
 
   // Trigger analysis via local FastAPI server
   const handleAnalyze = async (e?: React.FormEvent, customUrl?: string) => {
@@ -131,6 +165,7 @@ export default function App() {
       setGraphData(data);
       setSelectedNodeId(null);
       setShowDeleteImpact(false);
+      setCheckedTests({});
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Could not connect to analysis backend. Ensure the backend server is running on localhost:8000.');
@@ -147,6 +182,7 @@ export default function App() {
       setGraphData(MOCK_GRAPH);
       setSelectedNodeId(null);
       setShowDeleteImpact(false);
+      setCheckedTests({});
       setIsLoading(false);
     }, 1200);
   };
@@ -157,6 +193,7 @@ export default function App() {
     setSearchQuery('');
     setFilterType('ALL');
     setShowDeleteImpact(false);
+    setCheckedTests({});
   };
 
   // Extract unique file extensions for the filter dropdown
@@ -228,6 +265,28 @@ export default function App() {
   }, [graphData, selectedNodeId]);
 
   const selectedIsRemovalCandidate = Boolean(selectedNodeId && deadCodeCandidates.some(node => node.id === selectedNodeId));
+
+  const recommendedTests = useMemo(() => {
+    if (!selectedNodeId || !graphData) return [];
+    return getRecommendedManualTests(selectedNodeId, blastRadius);
+  }, [selectedNodeId, blastRadius, graphData]);
+
+  const fileCouplings = useMemo(() => {
+    if (!graphData || !selectedNodeId) return [];
+    const couplings = (graphData as any).historical_coupling || [];
+    return couplings
+      .filter((c: any) => c.file1 === selectedNodeId || c.file2 === selectedNodeId)
+      .map((c: any) => {
+        const partner = c.file1 === selectedNodeId ? c.file2 : c.file1;
+        return { partner, frequency: c.frequency, support: c.support, jaccard: c.jaccard };
+      })
+      .sort((a: any, b: any) => b.frequency - a.frequency);
+  }, [graphData, selectedNodeId]);
+
+  const topCouplings = useMemo(() => {
+    if (!graphData) return [];
+    return ((graphData as any).historical_coupling || []) as HistoricalCoupling[];
+  }, [graphData]);
 
   const selectNode = (nodeId: string | null) => {
     setSelectedNodeId(nodeId);
@@ -612,6 +671,139 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Safe Testing Checklist */}
+                  <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '10px', padding: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--color-success)' }}>
+                        <CheckCircle2 size={16} />
+                        <strong style={{ fontSize: '12px' }}>Safe Testing Checklist</strong>
+                      </div>
+                      <span style={{ fontSize: 10, color: '#fbbf24' }}>⭐⭐⭐⭐⭐</span>
+                    </div>
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12 }}>
+                      Recommended manual tests based on dependency blast radius.
+                    </p>
+                    
+                    {recommendedTests.length === 0 ? (
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>No manual verification tests recommended.</p>
+                    ) : (
+                      (() => {
+                        const nodeChecklist = checkedTests[selectedNodeId!] || {};
+                        const completedCount = recommendedTests.filter(t => nodeChecklist[t]).length;
+                        const totalCount = recommendedTests.length;
+                        const percent = Math.round((completedCount / totalCount) * 100);
+                        
+                        return (
+                          <div>
+                            {/* Checklist Progress */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                              <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ width: `${percent}%`, height: '100%', background: 'linear-gradient(90deg, var(--color-success) 0%, var(--color-accent) 100%)', transition: 'width 0.3s ease' }} />
+                              </div>
+                              <span style={{ fontSize: 11, fontWeight: 600, minWidth: 35, textAlign: 'right' }}>{completedCount}/{totalCount}</span>
+                            </div>
+                            
+                            {/* Checklist Items */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {recommendedTests.map(test => {
+                                const isChecked = !!nodeChecklist[test];
+                                return (
+                                  <label 
+                                    key={test}
+                                    style={{ 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 10, 
+                                      background: isChecked ? 'rgba(16, 185, 129, 0.04)' : 'rgba(255, 255, 255, 0.01)', 
+                                      border: `1px solid ${isChecked ? 'rgba(16, 185, 129, 0.25)' : 'var(--border-color)'}`, 
+                                      borderRadius: 8, 
+                                      padding: '8px 12px', 
+                                      cursor: 'pointer',
+                                      fontSize: 12,
+                                      transition: 'all 0.2s ease',
+                                      color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)'
+                                    }}
+                                  >
+                                    <input 
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setCheckedTests(prev => ({
+                                          ...prev,
+                                          [selectedNodeId!]: {
+                                            ...(prev[selectedNodeId!] || {}),
+                                            [test]: checked
+                                          }
+                                        }));
+                                      }}
+                                      style={{
+                                        accentColor: 'var(--color-success)',
+                                        cursor: 'pointer',
+                                        width: 14,
+                                        height: 14
+                                      }}
+                                    />
+                                    <span style={{ textDecoration: isChecked ? 'line-through' : 'none', opacity: isChecked ? 0.75 : 1 }}>
+                                      {test}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+
+                  {/* Node Historical Coupling */}
+                  <div>
+                    <h4 style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <History size={15} style={{ color: 'var(--color-accent)' }} />
+                      <span>Historical Coupling ({fileCouplings.length})</span>
+                    </h4>
+                    {fileCouplings.length === 0 ? (
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                        No git history coupling records found.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                          Developers who modify this file also commonly modify:
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {fileCouplings.map((c: any) => (
+                            <div 
+                              key={c.partner}
+                              onClick={() => selectNode(c.partner)}
+                              style={{ 
+                                background: 'rgba(255,255,255,0.02)', 
+                                border: '1px solid var(--border-color)', 
+                                borderRadius: '6px',
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                transition: 'border-color 0.2s'
+                              }}
+                              className="hover:border-cyan-500"
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '80%' }}>
+                                  {c.partner}
+                                </span>
+                                <strong style={{ color: 'var(--color-accent)' }}>{c.frequency}%</strong>
+                              </div>
+                              <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 1.5, overflow: 'hidden' }}>
+                                <div style={{ width: `${c.frequency}%`, height: '100%', background: 'var(--color-accent)' }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <button className="cyber-button-secondary" onClick={() => setShowDeleteImpact(value => !value)} style={{ width: '100%', justifyContent: 'center', borderColor: showDeleteImpact ? 'rgba(239, 68, 68, 0.55)' : undefined, color: showDeleteImpact ? '#fca5a5' : undefined }}>
                       <Trash2 size={15} /> {showDeleteImpact ? 'Hide Delete Assessment' : 'Simulate File Deletion'}
@@ -694,6 +886,46 @@ export default function App() {
                       </div>
                     )}
                   </section>
+
+                  {/* Top Co-change Coupling */}
+                  {topCouplings.length > 0 && (
+                    <section style={{ background: 'rgba(6, 182, 212, 0.05)', border: '1px solid rgba(6, 182, 212, 0.2)', borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--color-accent)', marginBottom: 10 }}>
+                        <History size={16} />
+                        <strong style={{ fontSize: 12 }}>Historical Coupling</strong>
+                      </div>
+                      <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 10 }}>
+                        Top file pairs commonly modified together (Git history co-change frequency).
+                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {topCouplings.slice(0, 5).map((c, i) => (
+                          <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: 6, padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', maxWidth: '75%' }}>
+                                <button 
+                                  onClick={() => selectNode(c.file1)} 
+                                  style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: 0, fontStyle: 'normal', fontFamily: 'var(--font-mono)', fontSize: 10, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {c.file1.split('/').pop()}
+                                </button>
+                                <span style={{ color: 'var(--text-muted)' }}>+</span>
+                                <button 
+                                  onClick={() => selectNode(c.file2)} 
+                                  style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: 0, fontStyle: 'normal', fontFamily: 'var(--font-mono)', fontSize: 10, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {c.file2.split('/').pop()}
+                                </button>
+                              </div>
+                              <strong style={{ color: 'var(--color-success)', fontSize: 12 }}>{c.frequency}%</strong>
+                            </div>
+                            <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden', marginTop: 6 }}>
+                              <div style={{ width: `${c.frequency}%`, height: '100%', background: 'var(--color-success)' }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   {/* List of Files in Sidebar */}
                   <div>
