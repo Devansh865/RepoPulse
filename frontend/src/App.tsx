@@ -150,7 +150,8 @@ export default function App() {
     }, 2500);
 
     try {
-      const response = await fetch('http://localhost:8000/api/analyze', {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${baseUrl}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo_url: urlToAnalyze })
@@ -168,7 +169,7 @@ export default function App() {
       setCheckedTests({});
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Could not connect to analysis backend. Ensure the backend server is running on localhost:8000.');
+      setError(err.message || 'Could not connect to analysis backend. Ensure the backend server is running.');
     } finally {
       clearInterval(messageInterval);
       setIsLoading(false);
